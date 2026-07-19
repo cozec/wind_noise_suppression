@@ -13,13 +13,78 @@ SI-SDR / PESQ / STOI.
    [SC-Wind-Noise-Generator](https://github.com/audiolabs/SC-Wind-Noise-Generator)
    was used in an earlier iteration (still cloned in `data/`).
 3. **Mix** at 0 dB SNR.
-4. **Suppress** with four methods:
-   - High-pass filter (150 Hz Butterworth)
-   - Spectral gating ([noisereduce](https://github.com/timsainb/noisereduce), non-stationary)
-   - [Meta Denoiser](https://github.com/facebookresearch/denoiser) (DNS64, causal, 16 kHz)
-   - [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) (48 kHz, run in a
-     separate py3.11 venv — its Rust extension has no py3.14 wheel)
+4. **Suppress** with four methods (see [Methods](#methods) below).
 5. **Evaluate** with SI-SDR, PESQ-WB, and STOI against the clean reference.
+
+## Methods
+
+### 1. High-pass filter (150 Hz Butterworth)
+
+Zero-phase 6th-order Butterworth high-pass (`scipy.signal.butter` +
+`sosfiltfilt`). The simplest possible wind suppressor: wind turbulence at a
+microphone produces energy that falls off roughly as 1/f, so a fixed cutoff
+removes the dominant rumble.
+
+- **Pros:** trivial, zero latency structure, no artifacts above the cutoff.
+- **Cons:** fixed trade-off — the cutoff also removes speech fundamentals
+  (male F0 ≈ 85–155 Hz). Works only when wind energy is truly confined to low
+  frequencies: it was the best method on synthetic wind (energy < 200 Hz) but
+  *hurts* SI-SDR on real strong wind, whose gusts extend well above 150 Hz.
+
+### 2. Spectral gating ([noisereduce](https://github.com/timsainb/noisereduce), non-stationary)
+
+STFT-domain noise gate. Estimates a per-frequency noise floor from a smoothed,
+time-varying statistic of the signal itself (non-stationary mode, no separate
+noise clip needed), then attenuates time-frequency bins that fall below
+threshold (`prop_decrease=0.95`).
+
+- **Pros:** no training, no reference signal, adapts to slowly varying noise;
+  removes broadband hiss visibly (cleanest-looking spectrogram of the
+  classical methods).
+- **Cons:** a gate can only *attenuate bins* — where wind and speech overlap
+  (0 dB SNR, low frequencies) it either lets wind through or cuts speech.
+  Aggressive gating costs speech energy, which is why its STOI drops slightly
+  below the noisy input despite looking cleaner.
+
+### 3. [Meta Denoiser](https://github.com/facebookresearch/denoiser) (DNS64)
+
+"Real Time Speech Enhancement in the Waveform Domain" (Défossez et al.,
+Interspeech 2020). A causal encoder/decoder U-Net with an LSTM bottleneck that
+maps noisy waveform directly to clean waveform (no STFT). We use the
+pretrained **DNS64** model (64 hidden channels, ~33 M params, 128 MB), trained
+on the Microsoft DNS challenge corpus, which includes wind-like noises.
+Native 16 kHz and causal — designed for real-time streaming use.
+
+- **Pros:** best results here by a wide margin (+10 dB SI-SDR on strong wind);
+  handles non-stationary gusts because it models *speech*, not the noise.
+- **Cons:** 33 M params; can hallucinate/over-smooth speech in conditions far
+  from its training data; fixed 16 kHz bandwidth.
+
+### 4. [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet)
+
+Two-stage low-complexity network (Schröter et al., ICASSP 2022/2023): stage 1
+enhances a coarse ERB-scaled spectral envelope; stage 2 applies *deep
+filtering* — short learned complex FIR filters per time-frequency bin — to
+reconstruct periodic speech structure. ~2 M params, designed for embedded /
+real-time use, operates natively at 48 kHz full-band.
+
+- **Pros:** ~16× smaller than DNS64, strong PESQ for its size, full-band.
+- **Cons:** trails Meta Denoiser here — partly a domain penalty: our 16 kHz
+  audio must be resampled to 48 kHz and back, and the model expects full-band
+  input. Packaging is dated: its Rust extension has no Python 3.14 wheel and
+  it imports an API removed from newer torchaudio, so it runs in a separate
+  py3.11 venv (torch 2.1.2) via subprocess (`src/dfn_enhance.py`).
+
+### Method comparison at a glance
+
+| | High-pass | Spectral gate | Meta Denoiser | DeepFilterNet |
+|---|---|---|---|---|
+| Type | fixed IIR filter | STFT gate | neural (waveform) | neural (spectral) |
+| Params / state | none | none | ~33 M | ~2 M |
+| Needs training | no | no | pretrained (DNS) | pretrained (DNS4) |
+| Causal / real-time | yes (as causal IIR) | yes-ish | yes | yes |
+| Native rate | any | any | 16 kHz | 48 kHz |
+| Strong wind, 0 dB (SI-SDR) | -2.6 dB | -0.6 dB | **10.0 dB** | 5.0 dB |
 
 See [summary.md](summary.md) for results — TL;DR: on real wind at 0 dB SNR the
 neural methods win decisively (Meta Denoiser: +10 dB SI-SDR), while classical

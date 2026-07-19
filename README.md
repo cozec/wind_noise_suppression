@@ -52,6 +52,21 @@ python src/wind_noise_demo.py          # main demo: metrics + wavs + spectrogram
 cd src && python plot_examples.py      # 2-example waveform+spectrogram comparison grids
 ```
 
+## Listen
+
+Sample audio from Example 1 (libri1 + strong wind, 0 dB SNR) — click a link,
+then use the player on the GitHub file page:
+
+| Audio | SI-SDR (dB) | PESQ-WB | STOI |
+|---|---:|---:|---:|
+| [Clean speech](results/clean.wav) | — | — | — |
+| [Wind only](results/wind_only.wav) | — | — | — |
+| [Noisy input (speech + wind)](results/noisy.wav) | -0.18 | 1.05 | 0.846 |
+| [High-pass 150 Hz](results/enhanced_highpass.wav) | -2.58 | 1.25 | 0.840 |
+| [Spectral gating](results/enhanced_spectral_gate.wav) | -0.64 | 1.16 | 0.827 |
+| [Meta Denoiser (DNS64)](results/enhanced_meta_denoiser.wav) | 10.00 | 1.63 | 0.943 |
+| [DeepFilterNet](results/enhanced_deepfilternet.wav) | 5.02 | 1.41 | 0.873 |
+
 ## Outputs
 
 - `results/*.wav` — clean, wind-only, noisy, and enhanced audio (listen to compare)

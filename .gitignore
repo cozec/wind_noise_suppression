@@ -1,8 +1,10 @@
 .venv/
 .venv-dfn/
 data/
-results/
 logs/
+results/*
+!results/*.wav
+!results/metrics.csv
 __pycache__/
 *.pyc
 .DS_Store
